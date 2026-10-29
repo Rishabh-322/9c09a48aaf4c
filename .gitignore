@@ -15,3 +15,5 @@ backend/app/data/*.json
 january_data_audit.csv
 january_deep_audit.csv
 *.tsbuildinfo
+.vercel
+.env*

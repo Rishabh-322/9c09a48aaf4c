@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+**/.venv/**
+**/node_modules/**
+**/dist/**
+**/__pycache__/**
+**/.pytest_cache/**
+january_data_audit.csv
+january_deep_audit.csv

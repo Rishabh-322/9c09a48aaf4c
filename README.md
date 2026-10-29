@@ -1,286 +1,897 @@
+
 # WindScope — UK Wind Procurement Intelligence
 
-**React + TypeScript · Python/FastAPI · Elexon BMRS · Docker**
+**A decision-support pilot for evaluating UK wind-generation forecasts at historical day-ahead purchasing decision times.**
 
-WindScope is a pilot decision-support application for a UK electricity procurement team. It helps analysts view historical wind-generation forecasts **as they existed when day-ahead purchase decisions were made**, compare those forecasts against actual wind generation, measure forecast errors, and audit the source data.
+[Live Application](https://9c09a48aaf4c.vercel.app) | [GitHub Repository](https://github.com/Rishabh-322/9c09a48aaf4c) | [Elexon BMRS API](https://bmrs.elexon.co.uk/api-documentation)
 
-> **Assessment scope:** Decisions made **1–31 January 2026**, resulting in delivery days **2 January–1 February 2026**. This day-ahead convention is an explicit modeling choice. The UI defaults to a *hypothetical* 12:00 UK local time decision cut-off, which users can change. It must **not** be interpreted as the actual contractual gate closure of any UK exchange.
+**Tech Stack:** React · TypeScript · Vite · Recharts · Python · FastAPI · httpx · Docker · GitHub Actions · Vercel
 
-> **Data integrity:** Live mode requests the specified `WINDFOR` (forecast) and `FUELHH` (actual, `fuelType=WIND`) Elexon datasets. Demo mode is independently generated **synthetic data and visibly labeled as such**. No sample values are passed off as genuine Elexon data. The January archive was validated on an Ubuntu host (31 distinct daily profiles and 744/744 matched hourly intervals); that check does not certify the upstream measurement definitions or source authenticity. Run the release smoke test again after deployment.
+> **Release v2.2 — October 2026**
+>
+> WindScope is deployed on Vercel and has passed its production HTTP acceptance tests using archived Elexon data. It is an analytical pilot, not an automated electricity trading or purchasing system.
 
-## Screens and features
+---
 
-| Page | Capabilities |
-| --- | --- |
-| Overview | Select delivery date and decision cut-off; see forecast/actual chart, daily MAE, bias, RMSE, coverage, energy summary and largest misses |
-| Forecast explorer | Inspect 24 hourly comparison slots (with both raw half-hour actuals) with target time, forecast, actual, error, source publication timestamp and match status; filter gaps |
-| Accuracy & risk | On-demand 31-day backtest (31 decision dates), weighted aggregate metrics, daily errors and drill-down |
-| Methodology | Source definitions, look-ahead-bias prevention, formulas, data-quality limitations, operational caveats |
-| Export | Auditable per-day CSV from the same backend analysis used on screen |
+## 1. Project Overview
 
-### How we prevent look-ahead bias
+Electricity suppliers in the UK must anticipate how much electricity their consumers will need and procure sufficient power from the wholesale market.
 
-For a delivery day `D` and selected UK cut-off `HH:MM`, the decision timestamp is `D-1 HH:MM Europe/London`. For **each individual forecast target `startTime`**, select the row whose `publishTime` is the latest not later than that decision timestamp. Later revisions never enter this analysis, even if they would have been more accurate.
+Part of this supply comes from renewable sources such as wind. However, wind generation is weather-dependent and difficult to predict accurately.
 
-1. Obtain source rows and parse timezone-aware UTC timestamps.
-2. Deduplicate/choose the latest forecast as of cut-off per target `startTime`.
-3. Keep the latest available `FUELHH` revision for the matching WIND target time.
-4. Build hourly actual means from the two half-hour FUELHH records starting at the forecast hour, then compare **on exact target UTC timestamps**.
-5. Display missing values as gaps and compute metrics **only over matched pairs**.
+This creates two important challenges for electricity procurement teams:
 
-WINDFOR forecasts are hourly while FUELHH reports half-hourly outturn. We compare each forecast with the arithmetic mean of both constituent actual readings; if either reading is absent, the hour is not matched. Both source readings remain visible and exportable. We never interpolate missing values. This is an *alignment assumption* for comparing MW, not a claim that the two datasets have identical sampling methodology.
+1. **Forecast visibility:** What was the latest wind-generation forecast available when a day-ahead purchasing decision was made?
+2. **Forecast accuracy:** How reliable were those forecasts, and how much uncertainty should the procurement team consider?
 
-## Quick start on Ubuntu (recommended)
+WindScope addresses these questions through an interactive web application that reconstructs historical wind-generation forecasts, compares them against actual generation, and provides quantitative error analysis.
 
-Requirements: Ubuntu 22.04+; Docker Engine with Compose v2; Git. Internet access is needed in live mode.
+The application uses publicly available data from the Elexon Balancing Mechanism Reporting Service (BMRS).
+
+### Assessment Scope
+
+| Parameter | Description |
+|---|---|
+| Decision period | 1–31 January 2026 |
+| Delivery period | 2 January–1 February 2026 |
+| Forecast dataset | Elexon WINDFOR |
+| Actual generation dataset | Elexon FUELHH, filtered to WIND |
+| Default decision cut-off | 12:00 UK time on the preceding day |
+| Forecast granularity | Hourly |
+| Actual generation granularity | Half-hourly |
+| Technology | React frontend, Python backend, Docker |
+
+**Important:** The 12:00 cut-off is a configurable analytical assumption. It is not a claim about the actual gate-closure time of a particular electricity exchange.
+
+WindScope deliberately focuses on wind-generation forecast analysis. It does not calculate actual purchasing quantities because consumer demand, contracted supply, pricing and other energy sources are outside the assignment's permitted data scope.
+
+---
+
+## 2. Key Features
+
+### 2.1 Overview Dashboard
+
+The Overview provides an interactive view of historical wind-generation performance.
+
+Users can:
+
+- Select a delivery date.
+- Configure a hypothetical decision cut-off.
+- Compare forecasted and actual wind generation.
+- Inspect forecast accuracy metrics.
+- Identify periods of significant forecasting error.
+- Review available source-data coverage.
+
+### 2.2 Analyst Decision Brief
+
+The Analyst Decision Brief translates raw forecast statistics into a concise business-oriented summary.
+
+It includes:
+
+- Net matched-hour forecast energy error.
+- Largest hourly forecast miss.
+- Latest eligible forecast publication timestamp.
+- Data completeness and coverage status.
+- A clear explanation of analysis limitations.
+
+The brief helps analysts understand historical forecasting performance without interpreting the results as direct trading recommendations.
+
+### 2.3 Decision Cut-off Comparison
+
+Wind forecasts are revised as updated weather information becomes available.
+
+WindScope allows analysts to compare forecasts available at two different hypothetical purchasing decision times, such as 09:00 and 18:00.
+
+The comparison includes:
+
+- Forecast MAE at each cut-off.
+- Forecast bias at each cut-off.
+- Number of revised forecast hours.
+- Net forecast energy revision.
+- Forecast coverage.
+- Paired forecast accuracy on identical matched hours.
+
+This reveals whether a later forecast was more or less accurate.
+
+A newer forecast is not automatically assumed to be better.
+
+### 2.4 Forecast Explorer
+
+The Forecast Explorer provides a detailed, auditable view of individual hourly records.
+
+For each period, the application displays:
+
+- Forecast target timestamp.
+- Forecasted generation in MW.
+- Actual generation in MW.
+- Both underlying half-hourly actual measurements.
+- Forecast error.
+- Forecast publication timestamp.
+- Data matching status.
+
+Missing data is displayed explicitly rather than silently filled or interpolated.
+
+### 2.5 Accuracy & Risk Analysis
+
+The application supports historical accuracy analysis across the complete January decision period.
+
+It provides:
+
+- Daily forecast accuracy.
+- Monthly aggregate metrics.
+- MAE and RMSE.
+- Forecast bias.
+- Mean Absolute Percentage Error.
+- Data coverage.
+- Historical performance comparisons.
+
+### 2.6 CSV Export
+
+Users can export daily analysis results in CSV format.
+
+Exports preserve relevant timestamps, source values and matching information to support independent review.
+
+---
+
+## 3. Core Analytical Methodology
+
+### 3.1 Preventing Look-Ahead Bias
+
+One of the most important engineering challenges is ensuring that historical analysis only uses information available when the purchasing decision was made.
+
+For delivery date `D`, WindScope constructs the decision timestamp using the selected cut-off on day `D - 1`.
+
+For each forecast target timestamp:
+
+1. Retrieve historical forecast publications.
+2. Parse publication and target timestamps.
+3. Exclude forecasts published after the decision cut-off.
+4. Select the most recently published eligible forecast.
+5. Match the forecast against actual generation for the same target period.
+6. Calculate accuracy metrics using valid forecast–actual pairs.
+
+A forecast published after the purchasing decision cannot be used in the historical decision reconstruction, even if it later proves more accurate.
+
+This prevents **look-ahead bias**.
+
+### 3.2 Aligning Different Time Resolutions
+
+The two Elexon datasets use different time intervals:
+
+- WINDFOR provides hourly wind-generation forecasts.
+- FUELHH provides half-hourly actual generation.
+
+WindScope aligns them by calculating the mean of the two half-hourly actual power readings corresponding to each forecast hour.
+
+```text
+Hourly actual MW =
+    (First half-hour actual MW + Second half-hour actual MW) / 2
+```
+
+For example:
+
+```text
+Forecast for 10:00–11:00 = 8,000 MW
+
+Actual at 10:00 = 7,600 MW
+Actual at 10:30 = 7,800 MW
+
+Hourly actual = (7,600 + 7,800) / 2
+              = 7,700 MW
+
+Forecast error = 8,000 - 7,700
+               = +300 MW
+```
+
+A positive error means the forecast overestimated generation.
+
+A negative error means the forecast underestimated generation.
+
+If either half-hourly actual record is missing, the corresponding hourly comparison is marked incomplete.
+
+This averaging is an explicit alignment convention and does not prove that WINDFOR and FUELHH use identical underlying measurement definitions.
+
+### 3.3 Forecast Accuracy Metrics
+
+**Mean Absolute Error (MAE)**
+
+```text
+MAE = Σ |Forecast - Actual| / N
+```
+
+MAE describes the average absolute forecasting error.
+
+**Root Mean Squared Error (RMSE)**
+
+```text
+RMSE = sqrt(Σ (Forecast - Actual)² / N)
+```
+
+RMSE penalizes larger errors more strongly than MAE.
+
+**Forecast Bias**
+
+```text
+Bias = Σ (Forecast - Actual) / N
+```
+
+Positive bias indicates average over-forecasting.
+
+Negative bias indicates average under-forecasting.
+
+**Mean Absolute Percentage Error (MAPE)**
+
+```text
+MAPE = mean(|Forecast - Actual| / |Actual|) × 100
+```
+
+MAPE is calculated only where the actual generation is nonzero.
+
+**Coverage**
+
+```text
+Coverage = Matched periods / Total requested periods × 100
+```
+
+Coverage measures data completeness, not forecast accuracy.
+
+### 3.4 Energy Accounting
+
+WindScope converts hourly average power values into energy using:
+
+```text
+Energy (MWh) = Average power (MW) × Duration (hours)
+```
+
+For an hourly interval, duration is one hour.
+
+Forecast and actual energy totals are calculated over identical matched periods.
+
+This prevents misleading comparisons when some hours have missing forecasts or actual measurements.
+
+The API identifies this approach using:
+
+```text
+energy_basis = matched_hours_only
+```
+
+### 3.5 Fair Decision Comparisons
+
+When comparing two decision cut-offs, WindScope calculates paired MAE using only hours available in both scenarios.
+
+This ensures a scenario with incomplete data is not unfairly compared against one with complete data.
+
+---
+
+## 4. Technology Stack
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Frontend | React | Interactive dashboard |
+| Language | TypeScript | Type-safe frontend development |
+| Build tool | Vite | Frontend development and production builds |
+| Visualization | Recharts | Forecast and accuracy charts |
+| Backend | Python | Business logic and data processing |
+| API framework | FastAPI | REST endpoints and validation |
+| HTTP client | httpx | External Elexon API requests |
+| Testing | pytest | Backend unit and API testing |
+| Containerization | Docker | Reproducible runtime packaging |
+| Local orchestration | Docker Compose | Frontend and backend development services |
+| CI | GitHub Actions | Automated validation |
+| Hosting | Vercel Container Runtime | Public HTTPS deployment |
+
+---
+
+## 5. System Architecture
+
+```text
+                    +----------------------+
+                    |   React Frontend     |
+                    |   TypeScript + Vite  |
+                    |   Charts and Filters |
+                    +----------+-----------+
+                               |
+                               | HTTP /api/*
+                               |
+                               v
+                    +----------------------+
+                    |    FastAPI Backend   |
+                    |                      |
+                    | Request Validation   |
+                    | API Endpoints        |
+                    | Response Handling    |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |   Analytics Engine   |
+                    |                      |
+                    | As-of Forecasts      |
+                    | Timestamp Alignment  |
+                    | Error Calculations   |
+                    | Coverage Analysis    |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |   Elexon Adapter     |
+                    |                      |
+                    | HTTP Requests        |
+                    | Retries and Caching  |
+                    | Historical Snapshots |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |    Elexon BMRS API   |
+                    |                      |
+                    | WINDFOR              |
+                    | FUELHH (WIND)        |
+                    +----------------------+
+```
+
+### Architectural Decisions
+
+**Separation of concerns**
+
+The frontend handles presentation and interaction, while the backend owns data processing and accuracy calculations.
+
+**Independent domain logic**
+
+The analytics engine is separated from HTTP requests and UI rendering, allowing calculations to be tested independently.
+
+**External API abstraction**
+
+Elexon integration is isolated so changes in the upstream API do not require rewriting the analytical engine.
+
+**Multi-stage Docker build**
+
+The frontend is compiled in a Node.js build stage, then its generated assets are included in the Python runtime image.
+
+This allows the complete production application to run as a single container.
+
+---
+
+## 6. Running Locally on Ubuntu
+
+### Prerequisites
+
+- Ubuntu 22.04 or newer
+- Git
+- Docker Engine
+- Docker Compose v2
+- Node.js and npm for local frontend development
+- Python 3 for local backend development
+
+### Clone the Repository
 
 ```bash
-# From the extracted repository root (folder containing docker-compose.yml)
+git clone https://github.com/Rishabh-322/9c09a48aaf4c.git
+
+cd 9c09a48aaf4c
+```
+
+### Configure Environment Variables
+
+```bash
 cp .env.example .env
-# Default .env uses LIVE Elexon data.
+```
+
+The application supports two modes:
+
+```text
+WINDSCOPE_DATA_MODE=live
+```
+
+Uses genuine Elexon data from local snapshots or the external API.
+
+```text
+WINDSCOPE_DATA_MODE=demo
+```
+
+Uses clearly labeled synthetic data for offline exploration and development.
+
+### Start with Docker Compose
+
+```bash
 docker compose up --build
 ```
 
-- Open **http://localhost:5173** for the React dashboard.
-- Open **http://localhost:8000/docs** for interactive FastAPI documentation.
-- Open **http://localhost:8000/api/health** for a small API status JSON.
-- For offline UI exploration only: change `.env` to `WINDSCOPE_DATA_MODE=demo`, then run `docker compose up -d --force-recreate`.
-- To stop: `Ctrl+C` or `docker compose down` from another terminal. `docker compose down -v` additionally removes cached API data and frontend dependencies.
+Open:
 
-**Important:** Elexon historical requests can take time, and a whole-month backtest performs many network calls. Backend requests have retry logic and a 24-hour local JSON cache. The cache is a convenience; it is not a durable production database.
+- React dashboard: http://localhost:5173
+- FastAPI documentation: http://localhost:8000/docs
+- Health endpoint: http://localhost:8000/api/health
 
-### Recommended before cloud deployment: reproducible genuine data snapshot
-
-For a reliable demo, save actual Elexon responses into verified, date-specific JSON snapshots. This is **opt-in**: the ZIP does **not** contain an invented or unverified January dataset. The downloader fails if Elexon responds with missing forecasts or actuals, so it will not silently create a fake snapshot. After checking the results, the files are read locally instead of requiring repeated upstream requests on every Heroku boot.
+Stop the application:
 
 ```bash
-# From repository root; requires backend Python dependencies and internet
-python3 -m venv backend/.venv
-source backend/.venv/bin/activate
-pip install -r backend/requirements.txt
-python scripts/snapshot_january.py
-# Creates backend/app/data/2026-01-02.json ... 2026-02-01.json
-# Inspect quality and source timestamps after this completes.
+docker compose down
 ```
 
-Then run `python scripts/validate_january.py` to write a day-by-day CSV audit. **Do not claim a validated real-data backtest until its results have been reviewed.**
-
-Run this **before** building the final production image to include snapshots in the Docker build context. The BMRS open-data licence allows reuse and redistribution subject to its attribution and other terms; preserve the exact required attribution (see Sources). Snapshots remain ignored by Git by default, so a clean cloud checkout will not include them unless you explicitly provide the archives through an approved deployment process. Snapshots contain public upstream records, never demo data. To force fresh API requests when diagnosing a snapshot, set `WINDSCOPE_IGNORE_ARCHIVE=1`.
-
-### Production-style single-container local run
+### Production-Style Docker Build
 
 ```bash
 docker build -t windscope:local .
-docker run --rm -p 8000:8000 -e WINDSCOPE_DATA_MODE=live windscope:local
-# Browse http://localhost:8000
 ```
 
-This image builds Vite assets in a Node stage and serves React and FastAPI from the **same Python application** in the final image, avoiding any same-origin or CORS issues in production.
+Run:
 
-### Without Docker (development only)
+```bash
+docker run --rm \
+  -p 8001:8000 \
+  -e WINDSCOPE_DATA_MODE=live \
+  windscope:local
+```
 
-Backend terminal:
+Open:
+
+http://localhost:8001
+
+This runs the compiled React application and FastAPI backend inside one production container.
+
+---
+
+## 7. Running Without Docker
+
+### Backend
 
 ```bash
 cd backend
+
 python3 -m venv .venv
+
 source .venv/bin/activate
+
 pip install -r requirements-dev.txt
-WINDSCOPE_DATA_MODE=live uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+WINDSCOPE_DATA_MODE=live \
+uvicorn app.main:app --reload --port 8000
 ```
 
-Frontend terminal:
+### Frontend
+
+In another terminal:
 
 ```bash
 cd frontend
-npm install
-# Set backend proxy destination if outside Docker. By default vite.config.ts uses the
-# Docker Compose service hostname "backend". Locally change it to http://localhost:8000.
+
+npm ci
+
 npm run dev
 ```
 
-## Verification and tests
+When running Vite directly on the host, verify that its development API proxy points to `http://localhost:8000` rather than the Docker Compose service hostname.
+
+---
+
+## 8. Historical Elexon Data
+
+### Data Sources
+
+WindScope uses:
+
+- WINDFOR: historical wind-generation forecasts.
+- FUELHH: actual generation, filtered to WIND.
+
+### Download Historical Data
+
+The project provides a script for downloading the January historical dataset.
+
+From the repository root:
 
 ```bash
-# Python unit + FastAPI integration tests, using synthetic data only
-cd backend
-pip install -r requirements-dev.txt
-python -m pytest -q
+python3 -m venv .venv
 
-# Frontend type-check and build
-cd ../frontend
-npm install
+source .venv/bin/activate
+
+pip install -r backend/requirements-dev.txt
+
+python scripts/snapshot_january.py
+```
+
+This creates daily JSON snapshots in:
+
+```text
+backend/app/data/
+```
+
+The assessment's 31 decision dates correspond to delivery dates from:
+
+```text
+2026-01-02
+through
+2026-02-01
+```
+
+### Validate the Data
+
+Run:
+
+```bash
+python scripts/validate_january.py
+```
+
+Then:
+
+```bash
+python scripts/deep_audit_january.py
+```
+
+### Verified January Audit Results
+
+The following results were obtained from the archived Elexon data on the Ubuntu development machine.
+
+| Validation | Result |
+|---|---|
+| Daily snapshots checked | 31/31 |
+| Distinct daily actual profiles | 31 |
+| Distinct daily forecast profiles | 31 |
+| Matched hourly periods | 744/744 |
+| Reported hourly coverage | 100% |
+| Backend tests | 20 passed |
+
+These results validate consistency under the application's matching rules.
+
+They do not independently certify upstream Elexon data authenticity or identical measurement coverage between the datasets.
+
+### Deployment Data Reproducibility
+
+The initial Vercel production release was uploaded from the Ubuntu development workspace with the 31 locally validated historical snapshots included.
+
+The GitHub repository excludes the raw daily snapshot files.
+
+Consequently, a fresh GitHub-triggered deployment may request data directly from Elexon instead of using the identical audited archive.
+
+A versioned, checksum-verified historical snapshot artifact is planned to make automated cloud builds independently reproducible.
+
+Until that workflow is verified, the initial snapshot-backed deployment and a fresh source-only build should not be described as identical.
+
+---
+
+## 9. Testing and Quality Assurance
+
+### Backend Tests
+
+From the repository root:
+
+```bash
+python -m pip install -r backend/requirements-dev.txt
+
+python -m pytest backend/tests -q
+```
+
+The v2.2 release candidate passed 20 Python tests.
+
+Tests cover:
+
+- Historical publication cut-offs.
+- Prevention of look-ahead bias.
+- Forecast revision selection.
+- Timestamp alignment.
+- Missing-data behavior.
+- Error metric calculations.
+- Matched-hour energy accounting.
+- API request validation.
+- CSV exports.
+- Decision comparison correctness.
+- Snapshot isolation.
+
+### Frontend Production Build
+
+```bash
+cd frontend
+
+npm ci
+
 npm run build
 ```
 
-Automated tests cover preventing future publications, per-target latest forecast selection, half-hour time matching, exclusion of non-wind fuels, zero-denominator MAPE, scope validation, month weighting, CSV, and API responses. The GitHub Actions workflow runs tests and a frontend build on pushes and PRs. The decision-cutoff comparison and completeness tests are included.
+The frontend production build was successfully verified on Ubuntu using TypeScript and Vite.
 
-Live smoke test on a network-connected Ubuntu host:
+### GitHub Actions
+
+The repository includes a GitHub Actions workflow for automated checks.
+
+[View CI Workflow Results](https://github.com/Rishabh-322/9c09a48aaf4c/actions)
+
+The CI pipeline checks backend tests, frontend build correctness and container-related acceptance behavior.
+
+### Production Smoke Tests
+
+The project includes an HTTP smoke test that validates critical application workflows against a running deployment.
 
 ```bash
-curl -fsS 'http://localhost:8000/api/health'
-curl -fsS 'http://localhost:8000/api/analysis?delivery_date=2026-01-16&cutoff=12:00' \
-  | python3 -m json.tool | head -n 45
+python scripts/smoke_release.py \
+  --url https://9c09a48aaf4c.vercel.app \
+  --mode live \
+  --expect-origin local_snapshot \
+  --full-coverage
 ```
 
-Verify `source` is **Elexon BMRS**, and inspect the `matched_periods`, forecast publication timestamps and missing-data statuses. A 200 response with empty matches should be investigated, not treated as a successful data integration. Inspect Elexon's current docs if upstream query arguments or field names change. The API client is isolated in `backend/app/elexon.py` so changes remain local.
+### Verified Production Results
 
-## Architecture
+On 29 October 2026, the production deployment passed:
 
 ```text
-                         Browser (React + TypeScript)
-                                      │
-             dashboard / filters / drill-down / CSV download
-                                      │ HTTP /api/*
-                                      ▼
-                          FastAPI (Python REST API)
-                  /analysis  /month  /export  /health  /meta
-                                      │
-                           Pure analytics module
-               (latest as-of + join + metrics + quality)
-                                      │
-                     Elexon API adapter (httpx client)
-                  retry / bounded concurrency / JSON cache
-                                      │
-                     Public Elexon BMRS Insights API
-                       WINDFOR      FUELHH (WIND)
+PASS health: version=2.2.0 mode=live commit=local
+
+PASS daily: local_snapshot 24/24 matched;
+net forecast error 9519.0 MWh
+
+PASS decision comparison:
+24 common hours; later_worse
+
+PASS monthly:
+31 days, 744/744 hours
+
+PASS CSV:
+24 hourly data rows plus header
+
+PASS invalid date:
+HTTP 422
+
+RELEASE SMOKE CHECK: PASSED
 ```
 
-## Repository structure
+These checks confirm that the deployed application responds correctly to its essential HTTP workflows.
+
+They do not constitute a formal security review or guarantee every external API failure scenario has been tested.
+
+---
+
+## 10. REST API Reference
+
+| Endpoint | Parameters | Purpose |
+|---|---|---|
+| `GET /api/health` | None | Application health, mode and version |
+| `GET /api/meta` | None | Application scope and metadata |
+| `GET /api/analysis` | `delivery_date`, `cutoff` | Daily wind forecast analysis |
+| `GET /api/compare` | `delivery_date`, `early`, `late` | Compare decision cut-offs |
+| `GET /api/month` | `cutoff` | Monthly historical analysis |
+| `GET /api/export` | `delivery_date`, `cutoff` | Export hourly results to CSV |
+
+### Example Request
+
+```bash
+curl 'https://9c09a48aaf4c.vercel.app/api/analysis?delivery_date=2026-01-16&cutoff=12:00'
+```
+
+### Example Response Fields
+
+```json
+{
+  "delivery_date": "2026-01-16",
+  "decision_date": "2026-01-15",
+  "cutoff_uk": "12:00",
+  "source": "Elexon BMRS · WINDFOR + FUELHH",
+  "statistics": {
+    "mae": 858.7,
+    "rmse": 1084.8,
+    "bias": 396.6,
+    "coverage_pct": 100.0,
+    "matched_periods": 24,
+    "period_minutes": 60
+  }
+}
+```
+
+This is an abbreviated example showing selected response fields.
+
+The production API returns additional metadata, the Analyst Decision Brief, and the hourly data.
+
+---
+
+## 11. Repository Structure
 
 ```text
 .
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI routes + React static asset serving
-│   │   ├── domain.py            # Pure time selection, matching and metrics
-│   │   ├── elexon.py            # Elexon HTTP client, retry and cache
-│   │   └── sample.py            # Explicit synthetic offline fixture generator
-│   ├── tests/                   # Analytics and API tests
-│   ├── requirements.txt         # Production Python dependencies
-│   ├── requirements-dev.txt     # Testing dependencies
-│   └── Dockerfile.dev           # Development API container
+│   │   ├── main.py
+│   │   ├── domain.py
+│   │   ├── elexon.py
+│   │   ├── sample.py
+│   │   └── data/
+│   ├── tests/
+│   ├── requirements.txt
+│   ├── requirements-dev.txt
+│   └── Dockerfile.dev
+│
 ├── frontend/
-│   ├── src/App.tsx              # UI screens, controls, visualizations
-│   ├── src/styles.css           # Design system + responsive layouts
-│   ├── src/types.ts             # Typed API responses
-│   ├── src/main.tsx             # React entrypoint
-│   ├── index.html
-│   ├── public/favicon.svg
-│   ├── vite.config.ts           # Development API proxy
-│   └── package.json
-├── scripts/validate_january.py # Audit real snapshot coverage before submission
-├── scripts/deep_audit_january.py # Audit distinct daily actual and forecast records
-├── scripts/smoke_release.py # Production HTTP acceptance suite
-├── docs/UPGRADE_V2_BUILD_ALONG.md # Data-alignment and scenario build tutorial
-├── docs/RELEASE_CANDIDATE_V2_2.md # Hands-on release candidate build guide
-├── .github/workflows/ci.yml     # Continuous integration
-├── scripts/setup_ubuntu.sh     # Ubuntu environment preflight
-├── scripts/snapshot_january.py  # Download genuine January archive (optional)
-├── docs/BUILD_AND_LEARN.md     # Beginner-to-intermediate explanation
-├── Dockerfile                  # Production multi-stage build
-├── docker-compose.yml          # Local React + API services
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── styles.css
+│   │   ├── types.ts
+│   │   └── main.tsx
+│   ├── package.json
+│   ├── package-lock.json
+│   └── vite.config.ts
+│
+├── scripts/
+│   ├── snapshot_january.py
+│   ├── validate_january.py
+│   ├── deep_audit_january.py
+│   ├── verify_live.py
+│   ├── smoke_release.py
+│   └── setup_ubuntu.sh
+│
+├── docs/
+│   ├── BUILD_AND_LEARN.md
+│   ├── UBUNTU_BUILD_ALONG_GUIDE.md
+│   ├── UPGRADE_V2_BUILD_ALONG.md
+│   ├── INTEGRITY_UPGRADE.md
+│   └── RELEASE_CANDIDATE_V2_2.md
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+│
+├── Dockerfile
+├── docker-compose.yml
 ├── .env.example
 └── README.md
 ```
 
-## REST contract
+---
 
-| Endpoint | Query parameters | Purpose |
-| --- | --- | --- |
-| `GET /api/health` | — | Service health + source mode |
-| `GET /api/meta` | — | Delivery scope, timezone and cut-off caveat |
-| `GET /api/analysis` | `delivery_date=2026-01-16&cutoff=12:00` | One delivery day with points + metrics |
-| `GET /api/compare` | `delivery_date=2026-01-16&early=09:00&late=18:00` | Compare two hypothetical procurement decision times using identical source data |
-| `GET /api/month` | `cutoff=12:00` | 31 delivery days and weighted aggregate |
-| `GET /api/export` | `delivery_date=2026-01-16&cutoff=12:00` | CSV source trail |
+## 12. Deployment — Vercel
 
-The API validates dates: only **2026-01-02 through 2026-02-01** may be requested. Cut-offs use `HH:MM` in **Europe/London** time. Error sign is `forecast − actual`. MAE/RMSE/bias are in MW. Hourly forecast energy is `hourly MW × 1 hour` (MWh); raw FUELHH half-hour energy is `MW × 0.5 hour` (MWh).
+### Live Application
 
-## Deployment: Heroku, using Docker
+**Production URL:**
 
-The challenge allows Vercel or Heroku. **Heroku container deployment is the straightforward path for this React + Python monorepo**, using the production Dockerfile. Do not publish until the live dataset is verified; Heroku may require a paid plan.
+https://9c09a48aaf4c.vercel.app
 
-1. Create your anonymous public GitHub repository and push the source. Do not put your name in the repo slug or make promises about live availability before verification.
-2. Install [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) and sign in (`heroku login`).
-3. Run in the repository root:
+**GitHub Repository:**
 
-```bash
-heroku create YOUR-ANONYMOUS-APP-NAME --stack container
-heroku config:set WINDSCOPE_DATA_MODE=live -a YOUR-ANONYMOUS-APP-NAME
-heroku container:login
-heroku container:push web -a YOUR-ANONYMOUS-APP-NAME
-heroku container:release web -a YOUR-ANONYMOUS-APP-NAME
-heroku open -a YOUR-ANONYMOUS-APP-NAME
+https://github.com/Rishabh-322/9c09a48aaf4c
+
+The application is hosted using Vercel's Container framework.
+
+The production Dockerfile uses a multi-stage build:
+
+1. Node.js installs dependencies and builds the React frontend.
+2. Python installs backend dependencies.
+3. The compiled React assets are copied into the Python runtime image.
+4. FastAPI serves the API and production frontend through the same origin.
+
+### Vercel Environment Variables
+
+```text
+WINDSCOPE_DATA_MODE=live
+PORT=8000
 ```
 
-4. In the final submission README, replace this placeholder with the actual verified deployment URL:
+The `PORT` value is configured for the container deployment environment.
 
-**Deployed URL:** `TO_BE_ADDED_AFTER_SUCCESSFUL_LIVE_DEPLOYMENT`
+### Deployment Commands
 
-5. Check `/api/health`, `/api/analysis`, CSV export and `/api/month` **in an incognito browser**. The assignment also asks that the YouTube demo and anonymous public GitHub repository be externally accessible before submission.
-
-Heroku container filesystems are ephemeral; JSON cache is not permanent between restarts. For a durable commercial system, migrate raw source history and processed metrics to managed object storage and PostgreSQL and precompute daily snapshots.
-
-## Design choices, safeguards and honest limitations
-
-- **Time-zone handling:** source timestamps are UTC; the cut-off is anchored to the previous `Europe/London` local date. January 2026 is UTC+00:00. Using the named zone makes the rule explicit for future extension.
-- **No misleading completeness:** missing forecast periods are `null`. No filling, interpolation or fabricated source data. Metrics use actual forecast matches, and coverage is visible.
-- **Revision history:** selection is done per target timestamp, not by taking the final published revision of the day.
-- **No unlicensed price/demand assertions:** requirement expressly forbids datasets beyond FUELHH and WINDFOR. The app cannot determine how much extra power a utility must buy without demand, contracted generation and other supply.
-- **No confidence intervals inferred from tiny samples:** MAE/RMSE/bias are historical diagnostics, not 95% prediction intervals. A risk reserve would need empirical calibration and additional analysis.
-- **API availability:** upstream requests can time out, throttle or return schema changes. Errors are surfaced, never silently replaced by mock data.
-- **Known scope limitation:** the pilot fetches forecast publications from the decision day and **one preceding calendar day**. If a forecast was last published even earlier, it will not appear; a production archive should use a wider, documented as-of lookback and record its data completeness.
-- **Source interpretation:** The requested Elexon sources represent their own definitions of national actual and forecast generation. They are not a full representation of all wind generation or all electricity purchased by a supplier.
-- **Data precision:** published wind forecasts can have non-half-hour cadence. The dashboard compares hourly WINDFOR to complete-hour averages of FUELHH without inventing either forecast or actual values.
-- **Production hardening pending:** no user authentication, durable warehouse, automated ingestion scheduler, request throttling, observability, API version pinning, error budget or security review. This is a polished pilot, not a live trading platform.
-
-## AI tools disclosure
-
-**AI tools were used to assist in designing the interface, drafting React/FastAPI implementation, analytical logic, tests, and documentation.** This is allowed by the assessment and is explicitly disclosed. The submitter remains responsible for testing and independently validating all calculations, data-source semantics and deployment behavior.
-
-## Sources
-
-- [Elexon FUELHH stream documentation](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
-- [Elexon WINDFOR stream documentation](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream)
-- [Elexon Insights API developer portal](https://developer.data.elexon.co.uk/)
-- [Elexon BMRS open-data copyright licence](https://www.elexon.co.uk/bsc/data/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/) (required attribution: **Contains BMRS data © Elexon Limited copyright and database right 2026**).
-
-
-## Release candidate v2.2 improvements
-
-- **Analyst brief:** retrospective net energy error (MWh) and peak hourly miss based only on matched periods, with source publication provenance and an explicit no-trading-recommendation caveat.
-- **Defensible decision comparison:** in addition to separate cut-off MAEs, the dashboard reports *paired MAE on the same matched hours* and the signed difference (later minus earlier). Incomplete coverage at one cut-off cannot falsely skew a conclusion.
-- **Data source provenance:** the API labels synthetic fixtures, local historical Elexon snapshots, and Elexon API-or-cache retrievals separately; the frontend does not claim an API fetch is fresh when a local archive was used.
-- **Frontend consistency:** cancel stale monthly/comparison requests and refuse to show a previous date's report under new selection controls. Failed monthly requests can be retried from the empty state.
-- **Production quality:** 20 Python tests, a Docker HTTP acceptance script for `/api/*`, and a dedicated clean-checkout Docker smoke job in GitHub Actions. These are *not* substitutes for validating the real-data deploy.
-- **Licensing:** the application displays the required BMRS attribution and links to Elexon's licence.
+From a prepared local checkout:
 
 ```bash
-python -m pytest backend/tests -q
-python scripts/smoke_release.py --url http://localhost:8004 --mode live --expect-origin local_snapshot --full-coverage
+npm install -g vercel
+
+vercel login
+
+vercel link
+
+vercel --prod
 ```
 
-The standalone release patch is documented step-by-step in `docs/RELEASE_CANDIDATE_V2_2.md`. A clean public CI job runs in demo mode; archived data is not distributed through Git automatically.
+A fresh Git-triggered build additionally requires the historical dataset to be made available if the exact archived-data release is to be reproduced.
 
-## Assessment-focused v2 improvements
+### Public Accessibility
 
-- **Correct hourly comparison:** align 24 hourly WINDFOR predictions to the mean of two complete FUELHH half-hour readings. Never pair one 30-minute actual with a 60-minute forecast or multiply forecast energy by 0.5.
-- **Decision cut-off sensitivity:** compare 09:00 and 18:00 UK hypothetical decisions for the same delivery day; report changed forecast hours and comparable forecast-energy movement without claiming a trading result.
-- **Auditable source trail:** display and export both raw FUELHH half-hour values and selected WINDFOR publication timestamp.
-- **QA evidence:** run `python scripts/validate_january.py` on actual downloaded snapshots to create `january_data_audit.csv`; report any missing days or unmatched hours truthfully.
-- **Validation status:** a real January snapshot on the Ubuntu development machine passed the distinct-profile audit (31/31) and hourly matching audit (744/744). The **v2.2 frontend production build has not been verified in this isolated environment** and must be run on Ubuntu before the public deployment.
+Before assessment submission, the live URL, GitHub repository and unlisted demonstration video should be checked in a private/incognito browser window.
 
-For a detailed build-along walkthrough see `docs/UPGRADE_V2_BUILD_ALONG.md`.
+The evaluator should not need a developer account or deployment-protection token to access the final deliverables.
 
-Quick live release smoke test against an already running `WINDSCOPE_DATA_MODE=live` application:
+---
 
-```bash
-python scripts/verify_live.py --url http://localhost:8001 --date 2026-01-16
-```
+## 13. Engineering Decisions
 
-A pass checks source mode, as-of timestamps, raw-actual completeness, and matched hourly coverage for one date; it does not claim all 31 decision days were verified.
+### Why React and FastAPI?
 
-## v2.1 integrity hardening
+React provides a component-based interface for interactive analysis, while FastAPI offers a lightweight Python environment for data processing and REST APIs.
 
-The reported `forecast_energy_mwh` and `actual_energy_mwh` always sum **identical matched hourly intervals** (`energy_basis=matched_hours_only`). With incomplete coverage, unmatched forecast-only or actual-only energy is excluded rather than compared against dissimilar periods. The `scripts/deep_audit_january.py` offline audit independently checks per-day profiles, publication cutoffs and half-hour completeness; see `docs/INTEGRITY_UPGRADE.md`. Health includes deployment `version` and optional build commit.
+### Why keep analytics on the backend?
+
+Centralizing calculations in Python avoids duplicating business logic across frontend components and makes the calculations independently testable.
+
+### Why historical forecast selection?
+
+Using the latest available forecast without accounting for publication time would introduce future information into historical analysis.
+
+### Why preserve raw measurements?
+
+Keeping source publication timestamps and underlying half-hourly measurements improves auditability and makes debugging easier.
+
+### Why Docker?
+
+Docker provides a reproducible application environment and reduces differences between local development and cloud deployment.
+
+### Why automated tests?
+
+Testing critical domain logic reduces the risk of incorrect forecasts, misleading accuracy calculations and regressions during development.
+
+### Why use local historical snapshots?
+
+Historical snapshots reduce reliance on repeated upstream API requests and support repeatable analysis of a defined historical period.
+
+---
+
+## 14. Known Limitations and Future Improvements
+
+WindScope is a product-level analytical pilot rather than a complete enterprise trading platform.
+
+Current limitations include:
+
+- No automatic electricity purchasing or market execution.
+- No customer demand data or other generation sources.
+- No electricity price or commercial exposure modeling.
+- No user authentication or role-based access control.
+- No persistent enterprise database.
+- No automated production ingestion scheduler.
+- No full observability or alerting stack.
+- No formal security review.
+- No statistically calibrated forecast confidence intervals.
+- A limited historical publication lookback.
+- Historical data snapshot reproducibility still being hardened for Git-based cloud deployments.
+
+Potential future improvements include managed historical storage, scheduled ingestion, audit logging, monitoring, broader forecast-history coverage, and better operational resilience.
+
+---
+
+## 15. Development Process and AI Disclosure
+
+The project was implemented iteratively:
+
+1. Understanding the business requirements and Elexon datasets.
+2. Designing the React and FastAPI architecture.
+3. Building the Elexon data integration.
+4. Implementing point-in-time forecast selection.
+5. Aligning hourly forecasts with half-hourly actuals.
+6. Implementing forecast accuracy calculations.
+7. Creating the interactive dashboard.
+8. Adding decision cut-off sensitivity analysis.
+9. Validating historical January data.
+10. Improving test isolation and data integrity.
+11. Adding analyst-focused UI features.
+12. Containerizing the application.
+13. Implementing automated tests and CI.
+14. Deploying and validating the application on Vercel.
+
+### AI Tools Disclosure
+
+AI tools were used to assist with:
+
+- Interface design.
+- React and FastAPI implementation.
+- Analytics logic.
+- Test development.
+- Debugging.
+- Technical documentation.
+
+The assessment explicitly permits AI-assisted development.
+
+The submitter remains responsible for validating the application, reviewing source-data assumptions, verifying calculations and ensuring deployment correctness.
+
+---
+
+## 16. Data Sources and Attribution
+
+WindScope uses public datasets from Elexon BMRS.
+
+**Data sources:**
+
+- [Elexon WINDFOR Forecast API](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/WINDFOR/stream)
+- [Elexon FUELHH Actual Generation API](https://bmrs.elexon.co.uk/api-documentation/endpoint/datasets/FUELHH/stream)
+- [Elexon Insights API Developer Portal](https://developer.data.elexon.co.uk/)
+- [BMRS Data Copyright Licence](https://www.elexon.co.uk/bsc/data/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/)
+
+**Contains BMRS data © Elexon Limited copyright and database right 2026.**
+
+Elexon does not endorse or certify this application.
+
+The analysis is provided for retrospective evaluation and demonstration purposes.
