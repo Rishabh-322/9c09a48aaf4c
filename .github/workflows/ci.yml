@@ -1,0 +1,45 @@
+name: CI — backend tests and React build
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+      - name: Unit & API tests
+        run: cd backend && pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: cd frontend && npm install --no-audit --no-fund
+      - name: Typecheck & build
+        run: cd frontend && npm run build
+
+  production-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image from clean checkout
+        run: docker build -t windscope:ci .
+      - name: Start production container in demo mode
+        run: docker run -d --name windscope-ci -p 8000:8000 -e WINDSCOPE_DATA_MODE=demo windscope:ci
+      - name: Exercise HTTP endpoints and static app
+        run: |
+          python3 scripts/smoke_release.py --url http://localhost:8000 --mode demo --expect-origin synthetic
+          curl -fsS http://localhost:8000/ | grep -q '<div id="root"'
+      - name: Print container logs if failing
+        if: failure()
+        run: docker logs windscope-ci || true
