@@ -14,3 +14,4 @@ backend/app/data/*.json
 # Locally generated audit evidence
 january_data_audit.csv
 january_deep_audit.csv
+*.tsbuildinfo
